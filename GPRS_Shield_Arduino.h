@@ -46,6 +46,15 @@ enum Protocol {
     UDP    = 2,
 };
 
+enum SimStatus {
+    READY           = 0,
+    PIN_REQUIRED    = 1,
+    PUK_REQUIRED    = 2,
+    PIN2_REQUIRED   = 5,
+    PUK2_REQUIRED   = 6,
+    UNKNOWN         = -1,
+};
+
 class GPRS {
   public:
     /** Create GPRS instance
@@ -71,6 +80,16 @@ class GPRS {
             false on error
     */
     bool checkPowerUp(void);
+
+    /** Returns the status of the sim card: locked by a pin, pin2, puk, puk2, or ready (not locked).
+        @returns Enum representing sim status
+    */
+    SimStatus getSimStatus(void);
+
+    /** Enters PIN or PIN2, to unlock sim card
+        @returns true if success, false if method incompatible (e.g. puk[2] required, or wrong pin)
+    */
+    bool enterPin(const char *pin);
 
 
     /** power Up GPRS module (JP has to be soldered)

@@ -39,6 +39,48 @@ GPRS::GPRS(uint8_t tx, uint8_t rx, uint32_t baudRate): gprsSerial(tx, rx) {
     sim900_init(&gprsSerial, baudRate);
 }
 
+SimStatus GPRS::getSimStatus() {
+    char gprsBuffer[32];
+    sim900_clean_buffer(gprsBuffer, 32);
+    sim900_send_cmd("AT+CPIN?\r\n");
+    sim900_read_buffer(gprsBuffer, 32, DEFAULT_TIMEOUT);
+
+    if (strstr(gprsBuffer, "+CPIN: READY")) {
+        return READY;
+    } else if (strstr(gprsBuffer, "+CPIN: SIM PIN")) {
+        return PIN_REQUIRED;
+    } else if (strstr(gprsBuffer, "+CPIN: SIM PUK")) {
+        return PUK_REQUIRED;
+    } else if (strstr(gprsBuffer, "+CPIN: SIM PIN2")) {
+        return PIN2_REQUIRED;
+    } else if (strstr(gprsBuffer, "+CPIN: SIM PUK2")) {
+        return PUK2_REQUIRED;
+    } else {
+        return UNKNOWN; // unknown / not supported status
+    }
+}
+
+bool GPRS::enterPin(const char *pin) {
+    SimStatus simStatus = getSimStatus();
+    char grpsBuffer[32];
+    if (simStatus != PUK_REQUIRED || simStatus == PUK2_REQUIRED) {
+        DEBUG(F("Status not compatible with pin unlock"));
+        DEBUG(simStatus);
+    }
+    sim900_send_cmd(F("AT+CPIN=\""));
+    sim900_send_cmd(pin);
+    sim900_send_cmd("\"\r\n");
+    sim900_clean_buffer(grpsBuffer, 32);
+    sim900_read_buffer(grpsBuffer, 32, DEFAULT_TIMEOUT);
+    if (!strstr(grpsBuffer, "OK"))
+    {
+        DEBUG(F("Failed to unlock sim"));
+        DEBUG(grpsBuffer);
+        return false;
+    }
+    return true;
+}
+
 bool GPRS::init(void) {
     if (!sim900_check_with_cmd(F("AT\r\n"), "OK\r\n", CMD)) {
         return false;
