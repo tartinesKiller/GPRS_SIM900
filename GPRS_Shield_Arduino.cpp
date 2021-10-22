@@ -46,26 +46,26 @@ SimStatus GPRS::getSimStatus() {
     sim900_read_buffer(gprsBuffer, 32, DEFAULT_TIMEOUT);
 
     if (strstr(gprsBuffer, "+CPIN: READY")) {
-        return READY;
+        return SimStatus::READY;
     } else if (strstr(gprsBuffer, "+CPIN: SIM PIN")) {
-        return PIN_REQUIRED;
+        return SimStatus::PIN_REQUIRED;
     } else if (strstr(gprsBuffer, "+CPIN: SIM PUK")) {
-        return PUK_REQUIRED;
+        return SimStatus::PUK_REQUIRED;
     } else if (strstr(gprsBuffer, "+CPIN: SIM PIN2")) {
-        return PIN2_REQUIRED;
+        return SimStatus::PIN2_REQUIRED;
     } else if (strstr(gprsBuffer, "+CPIN: SIM PUK2")) {
-        return PUK2_REQUIRED;
+        return SimStatus::PUK2_REQUIRED;
     } else {
-        return UNKNOWN; // unknown / not supported status
+        return SimStatus::UNKNOWN; // unknown / not supported status
     }
 }
 
 bool GPRS::enterPin(const char *pin) {
     SimStatus simStatus = getSimStatus();
     char grpsBuffer[32];
-    if (simStatus != PUK_REQUIRED || simStatus == PUK2_REQUIRED) {
+    if (simStatus == SimStatus::PUK_REQUIRED || simStatus == SimStatus::PUK2_REQUIRED) {
         DEBUG(F("Status not compatible with pin unlock"));
-        DEBUG(simStatus);
+        return false;
     }
     sim900_send_cmd(F("AT+CPIN=\""));
     sim900_send_cmd(pin);
@@ -78,6 +78,122 @@ bool GPRS::enterPin(const char *pin) {
         DEBUG(grpsBuffer);
         return false;
     }
+    return true;
+}
+
+bool GPRS::initMms(const char *mmsUrl, const char *mmsGw, uint8_t port, const char *apn, MmsValidity validity = MmsValidity::NOT_SET, MmsPriority priority = MmsPriority::NOT_SET) {
+    char gprsBuffer[32];
+    if (!sim900_check_with_cmd(F("AT+CMMSINIT\r\n"), "OK", CMD, 10000, 10000)) {
+        DEBUG(F("Failed to init MMS, but well"));
+        termMms();
+        return false;
+    }
+    sim900_clean_buffer(gprsBuffer, 32);
+    sim900_send_cmd(F("AT+CMMSCURL=\""));
+    sim900_send_cmd(mmsUrl);
+    sim900_send_cmd("\"\r\n");
+    sim900_read_buffer(gprsBuffer, 32, DEFAULT_TIMEOUT);
+    if (strstr(gprsBuffer, "OK") == NULL) {
+        DEBUG(F("Failed to configure MMS url"));
+        termMms();
+        return false;
+    }
+
+    if (!sim900_check_with_cmd(F("AT+CMMSCID=1\r\n"), "OK", CMD)) {
+        DEBUG(F("Failed to set MMSCID"));
+        termMms();
+        return false;
+    }
+
+    sim900_clean_buffer(gprsBuffer, 32);
+    char *cMmsSendCfgCmd = (char*)calloc(31, sizeof(char));
+    sprintf(cMmsSendCfgCmd, "AT+CMMSSENDCFG=%d,%d,0,0,2,4,2,0\r\n", (byte)validity, (byte)priority);
+    bool successMmsSendCfg = sim900_check_with_cmd(cMmsSendCfgCmd, "OK", CMD);
+    free(cMmsSendCfgCmd); // free it here, to avoid omission in case of edit of this part
+    if (!successMmsSendCfg) {
+        DEBUG(F("Failed to configure send MMS"));
+        termMms();
+        return false;
+    }
+
+    if (!sim900_check_with_cmd(F("AT+SAPBR=3,1,\"Contype\",\"GPRS\"\r\n"), "OK", CMD)) {
+        DEBUG(F("Failed to set Contype"));
+        termMms();
+        return false;
+    }
+
+    char *sapbrApnCmd = (char*)calloc(50, sizeof(char));
+    sprintf(sapbrApnCmd, "AT+SAPBR=3,1,\"APN\",\"%s\"\r\n", apn);
+
+    bool successApnCmd = sim900_check_with_cmd(sapbrApnCmd, "OK", CMD);
+    free(sapbrApnCmd);
+    if (!successApnCmd) {
+        DEBUG(F("Failed to set APN"));
+        termMms();
+        return false;
+    }
+
+    if (!sim900_check_with_cmd(F("AT+SAPBR=1,1\r\n"), "OK", CMD)) {
+        DEBUG(F("Failed to activate bearer context"));
+        termMms();
+        return false;
+    }
+
+    if (!sim900_check_with_cmd(F("AT+SAPBR=2,1\r\n"), "OK", CMD)) {
+        DEBUG(F("Failed to do SAPBR=2,1"));
+        termMms();
+        return false;
+    }
+}
+
+void GPRS::termMms() {
+    sim900_send_cmd(F("AT+CMMSTERM\r\n"));
+}
+
+bool GPRS::sendMMS(const char *dstNumber, char (*nextByteFn)(), uint32_t bodySize) {
+    if (!sim900_check_with_cmd(F("AT+CMMSEDIT=1\r\n"), "OK", CMD)) {
+        DEBUG(F("Failed to MMSEDIT"));
+        termMms();
+        return false;
+    }
+
+    char *mmsDownCmd = (char*)calloc(40, sizeof(char));
+    sprintf(mmsDownCmd, "AT+CMMSDOWN=\"PIC\",%d,300000\r\n", bodySize);
+    bool successMmsDownCmd = sim900_check_with_cmd(mmsDownCmd, "OK", CMD);
+    free(mmsDownCmd);
+    if (!successMmsDownCmd) {
+        DEBUG(F("Failed to initiate MMS down"));
+        termMms();
+        return false;
+    }
+
+    for (uint32_t byteSent = 0; byteSent < bodySize; byteSent++) {
+        char byte = nextByteFn();
+        sim900_send_byte(byte);
+    }
+    if (!sim900_wait_for_resp("OK", CMD)) {
+        DEBUG(F("Failed to transfer all data"));
+        termMms();
+        return false;
+    }
+
+    sim900_send_cmd(F("AT+CMMSRECP=\""));
+    sim900_send_cmd(dstNumber);
+    sim900_send_cmd("\"\r\n");
+    if (!sim900_wait_for_resp("OK", CMD)) {
+        DEBUG(F("Failed to set recipient"));
+        termMms();
+        return false;
+    }
+
+    if (!sim900_check_with_cmd(F("AT+CMMSSEND"), "OK", CMD, 300000)) {
+        DEBUG(F("Failed to send MMS"));
+        termMms();
+        return false;
+    }
+
+    sim900_send_cmd(F("AT+CMMSEDIT=0")); // clear current MMS
+    termMms();
     return true;
 }
 

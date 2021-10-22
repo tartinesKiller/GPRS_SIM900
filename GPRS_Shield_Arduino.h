@@ -46,13 +46,30 @@ enum Protocol {
     UDP    = 2,
 };
 
-enum SimStatus {
+enum class SimStatus {
     READY           = 0,
     PIN_REQUIRED    = 1,
     PUK_REQUIRED    = 2,
     PIN2_REQUIRED   = 5,
     PUK2_REQUIRED   = 6,
     UNKNOWN         = -1,
+};
+
+enum class MmsValidity {
+    ONE_HOUR        = 0,
+    TWELVE_HOURS    = 1,
+    ONE_DAY         = 2,
+    TWO_DAYS        = 3,
+    ONE_WEEK        = 4,
+    MAXIMUM         = 5,
+    NOT_SET         = 6,
+};
+
+enum class MmsPriority {
+    LOWEST  = 0,
+    NORMAL  = 1,
+    HIGHEST = 2,
+    NOT_SET = 3,
 };
 
 class GPRS {
@@ -116,6 +133,12 @@ class GPRS {
               false for no SIM detected
     */
     bool checkSIMStatus(void);
+
+    bool initMms(const char *mmsUrl, const char *mmsGw, uint8_t port, const char *apn, MmsValidity validity = MmsValidity::NOT_SET, MmsPriority priority = MmsPriority::NOT_SET);
+
+    bool sendMMS(const char *dstNumber, char (*nextByteFn)(), uint32_t bodySize);
+
+    void termMms();
 
     /** send text SMS
         @param  *number phone number which SMS will be send to
