@@ -88,12 +88,11 @@ bool GPRS::initMms(const char *mmsUrl, const char *mmsGw, uint8_t port, const ch
         termMms();
         return false;
     }
-    sim900_clean_buffer(gprsBuffer, 32);
-    sim900_send_cmd(F("AT+CMMSCURL=\""));
-    sim900_send_cmd(mmsUrl);
-    sim900_send_cmd("\"\r\n");
-    sim900_read_buffer(gprsBuffer, 32, DEFAULT_TIMEOUT);
-    if (strstr(gprsBuffer, "OK") == NULL) {
+
+    char *cmmsUrlCmd = (char*)calloc(50, sizeof(char));
+    sprintf(cmmsUrlCmd, "AT+CMMSCURL=\"%s\"\r\n", mmsUrl);
+    bool successCmmsUrl = sim900_check_with_cmd(cmmsUrlCmd, "OK", CMD);
+    if (!successCmmsUrl) {
         DEBUG(F("Failed to configure MMS url"));
         termMms();
         return false;
@@ -101,6 +100,16 @@ bool GPRS::initMms(const char *mmsUrl, const char *mmsGw, uint8_t port, const ch
 
     if (!sim900_check_with_cmd(F("AT+CMMSCID=1\r\n"), "OK", CMD)) {
         DEBUG(F("Failed to set MMSCID"));
+        termMms();
+        return false;
+    }
+
+    char *mmsProtoCmd = (char*)calloc(50, sizeof(char));
+    sprintf(mmsProtoCmd, "AT+CMMSPROTO=\"%s\",%d\r\n", mmsGw, port);
+    bool successMmsProto = sim900_check_with_cmd(mmsProtoCmd, "OK", CMD);
+    free(mmsProtoCmd);
+    if (!successMmsProto) {
+        DEBUG(F("Failed to set GW and port"));
         termMms();
         return false;
     }
@@ -133,7 +142,9 @@ bool GPRS::initMms(const char *mmsUrl, const char *mmsGw, uint8_t port, const ch
         return false;
     }
 
-    if (!sim900_check_with_cmd(F("AT+SAPBR=1,1\r\n"), "OK", CMD)) {
+    delay(1000);
+
+    if (!sim900_check_with_cmd(F("AT+SAPBR=1,1\r\n"), "OK", CMD, DEFAULT_TIMEOUT, 30000)) {
         DEBUG(F("Failed to activate bearer context"));
         termMms();
         return false;
@@ -144,13 +155,15 @@ bool GPRS::initMms(const char *mmsUrl, const char *mmsGw, uint8_t port, const ch
         termMms();
         return false;
     }
+
+    return true;
 }
 
 void GPRS::termMms() {
     sim900_send_cmd(F("AT+CMMSTERM\r\n"));
 }
 
-bool GPRS::sendMMS(const char *dstNumber, char (*nextByteFn)(), uint32_t bodySize) {
+bool GPRS::sendMMS(const char *dstNumber, byte (*nextByteFn)(), uint32_t bodySize) {
     if (!sim900_check_with_cmd(F("AT+CMMSEDIT=1\r\n"), "OK", CMD)) {
         DEBUG(F("Failed to MMSEDIT"));
         termMms();
@@ -159,7 +172,7 @@ bool GPRS::sendMMS(const char *dstNumber, char (*nextByteFn)(), uint32_t bodySiz
 
     char *mmsDownCmd = (char*)calloc(40, sizeof(char));
     sprintf(mmsDownCmd, "AT+CMMSDOWN=\"PIC\",%d,300000\r\n", bodySize);
-    bool successMmsDownCmd = sim900_check_with_cmd(mmsDownCmd, "OK", CMD);
+    bool successMmsDownCmd = sim900_check_with_cmd(mmsDownCmd, "CONNECT", CMD);
     free(mmsDownCmd);
     if (!successMmsDownCmd) {
         DEBUG(F("Failed to initiate MMS down"));
@@ -168,7 +181,7 @@ bool GPRS::sendMMS(const char *dstNumber, char (*nextByteFn)(), uint32_t bodySiz
     }
 
     for (uint32_t byteSent = 0; byteSent < bodySize; byteSent++) {
-        char byte = nextByteFn();
+        byte byte = nextByteFn();
         sim900_send_byte(byte);
     }
     if (!sim900_wait_for_resp("OK", CMD)) {
@@ -177,28 +190,38 @@ bool GPRS::sendMMS(const char *dstNumber, char (*nextByteFn)(), uint32_t bodySiz
         return false;
     }
 
-    sim900_send_cmd(F("AT+CMMSRECP=\""));
-    sim900_send_cmd(dstNumber);
-    sim900_send_cmd("\"\r\n");
-    if (!sim900_wait_for_resp("OK", CMD)) {
+    char *setRecpCmd = (char*)calloc(50, sizeof(char));
+    sprintf(setRecpCmd, "AT+CMMSRECP=\"%s\"\r\n", dstNumber);
+    bool successSetRecp = sim900_check_with_cmd(setRecpCmd, "OK", CMD);
+    free(setRecpCmd);
+
+    if (!successSetRecp) {
         DEBUG(F("Failed to set recipient"));
         termMms();
         return false;
     }
 
-    if (!sim900_check_with_cmd(F("AT+CMMSSEND"), "OK", CMD, 300000)) {
+    sim900_send_cmd(F("AT+CMMSVIEW\r\n"));
+    delay(500);
+    sim900_flush_serial();
+
+    if (!sim900_check_with_cmd(F("AT+CMMSSEND\r\n"), "OK", CMD, 300000, 900000)) {
         DEBUG(F("Failed to send MMS"));
         termMms();
         return false;
     }
 
-    sim900_send_cmd(F("AT+CMMSEDIT=0")); // clear current MMS
+    sim900_send_cmd(F("AT+CMMSEDIT=0\r\n")); // clear current MMS
     termMms();
     return true;
 }
 
 bool GPRS::init(void) {
     if (!sim900_check_with_cmd(F("AT\r\n"), "OK\r\n", CMD)) {
+        return false;
+    }
+
+    if (!sim900_check_with_cmd(F("AT+CMEE=2\r\n"), "OK", CMD)) {
         return false;
     }
 

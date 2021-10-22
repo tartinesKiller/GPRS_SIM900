@@ -73,7 +73,7 @@ void sim900_read_buffer(char* buffer, int count, unsigned int timeout, unsigned 
             char c = serialSIM900->read();
             prevChar = millis();
             buffer[i++] = c;
-            DEBUG("-"); DEBUG(c);
+            DEBUG("<"); DEBUG(c);
             if (i >= count) {
                 break;
             }
@@ -104,6 +104,7 @@ char* sim900_read_string_until(char* buffer, uint16_t count, const char* pattern
     while (1) {
         if (serialSIM900->available()) {
             char c = serialSIM900->read();
+            DEBUG("<");
             DEBUG(c);
             prevChar = millis();
             buffer[i++] = c;
@@ -128,7 +129,6 @@ char* sim900_read_string_until(char* buffer, uint16_t count, const char* pattern
             break;
         }
     }
-    DEBUG("\n\n");
 
     return foundPtr;
 }
@@ -142,12 +142,14 @@ void sim900_clean_buffer(char* buffer, int count) {
 
 void sim900_send_byte(uint8_t data) {
     serialSIM900->write(data);
+    DEBUG(">");
     DEBUG((char)data);
 }
 
 
 void sim900_send_char(const char c) {
     serialSIM900->write(c);
+    DEBUG(">");
     DEBUG(c);
 }
 
@@ -188,7 +190,7 @@ boolean sim900_wait_for_resp(const char* resp, DataType type, unsigned int timeo
     while (1) {
         if (sim900_check_readable()) {
             char c = serialSIM900->read();
-            DEBUG("-");
+            DEBUG("<");
             DEBUG(c);
             prevChar = millis();
             sum = (c == resp[sum]) ? sum + 1 : 0;

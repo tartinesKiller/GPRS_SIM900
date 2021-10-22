@@ -136,7 +136,7 @@ class GPRS {
 
     bool initMms(const char *mmsUrl, const char *mmsGw, uint8_t port, const char *apn, MmsValidity validity = MmsValidity::NOT_SET, MmsPriority priority = MmsPriority::NOT_SET);
 
-    bool sendMMS(const char *dstNumber, char (*nextByteFn)(), uint32_t bodySize);
+    bool sendMMS(const char *dstNumber, byte (*nextByteFn)(), uint32_t bodySize);
 
     void termMms();
 
